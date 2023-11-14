@@ -63,15 +63,16 @@ class Is:
         pass
 
     def parse_args(self, args):
-        self.source = re.compile(args[0])
+        self.source = args[0]
+        #self.source = re.compile(args[0])
 
     def display(self):
         print("Is")
         print(self.source)
 
-    def run(self, query_state):
-        #return (self.source == query_state.get_current_cursor())
-        return bool(re.match(self.source, query_state.get_current_focus()))
+    def run(self, token):
+        #return (self.source == token.current)
+        return bool(re.match(self.source, token.current))
 
 class Within:
 
@@ -142,6 +143,7 @@ class TextCursor:
         self.previous_words = []
 
     def append_to_stream(self, words_as_ls):
+        #print(len(words_as_ls))
         self.next_words = words_as_ls
 
     def get_current_focus(self):
@@ -157,7 +159,8 @@ class TextCursor:
         if self.current:
             self.previous_words.append(self.current)
         if self.next_words:
-            self.current = self.next_words.pop(0)
+            self.current = self.next_words[0]
+            self.next_words = self.next_words[1:]
 
 
 def format_word_ctx(ls):
@@ -183,7 +186,6 @@ class QueryRunner:
         self.files = list_of_filenames
         self.n_files = len(self.files)
         self.n_total_files = len(self.files)
-        self.tokens = TextCursor()
 
         for i, file in enumerate(self.files):
             self.file_text = file
@@ -198,18 +200,17 @@ class QueryRunner:
             yield page
             
     def stream_tokens(self, tokens):
-        self.tokens.append_to_stream(tokens)
-        self.tokens.shift_cursor_right()
-        yield self.tokens
+        #tokens.(tokens)
+        tokens.shift_cursor_right()
+        yield tokens
 
-    def record_match(self):
-        cursor = self.tokens
+    def record_match(self, cursor):
         snapshot = {"file" : self.file_text,
                     "page" : self.page_number,
                     "word" : cursor.current,
                     "context before" : format_word_ctx(cursor.previous_words[-10:]),
                     "context after" : format_word_ctx(cursor.next_words[:10])}
-        self.n_matches =+ 1
+        self.n_matches += 1
         self.matches.append(snapshot)
 
 def report_progress(self):
@@ -224,6 +225,7 @@ def report_progress(self):
     print(f'Page: [{self.page_number}/{self.n_pages}]') 
     print(f'Time Elapsed: {seconds_elapsed} seconds')
     print(f'Number of Matches: {self.n_matches}')
+    #print(f'Tokens: {self.tokens.current}')
 
     
 def apply_predicate(predicate, token):
@@ -233,9 +235,9 @@ def run_query(env):
    
     path = input("Give me the folder name!\n")
     pred = input("Give me a query!\n")
-    #predicate = compile_predicate_from_string(pred)
+    predicate = compile_predicate_from_string("(= the)")
     path = "Unix"
-    predicate = compile_predicate_from_string("(or (= Unix) (within 5 command line) (= e))")
+    #predicate = compile_predicate_from_string("(or (= Unix) (within 5 command line) (= e))")
    
     env.set_folder_path(path)
     pdf_list = env.get_names_of_all_pdfs_in_folder()
@@ -246,18 +248,20 @@ def run_query(env):
 
         pdf_reader = PyPDF2.PdfReader(file)
         pages = pdf_reader.pages
+        tokens = TextCursor()
 
         for page in qr.stream_pages(pages):
 
             text = page.extract_text().split()
+            tokens.append_to_stream(text)
 
-            for token in qr.stream_tokens(text):
-
-                if apply_predicate(predicate, token):
-
-                    qr.record_match()
-            
-                report_progress(qr)
+            for token in qr.stream_tokens(tokens):
+                try:
+                    if predicate.run(token):
+                        qr.record_match(token)
+                except:
+                    pass
+            report_progress(qr)
 
     return qr
                     
@@ -279,7 +283,7 @@ def report_matches(query_result, env):
     ls = query_result.matches
     if ls:
         fields = ls[0].keys()
-        filename = env.path + "matches.csv"
+        filename = env.folder_path + "matches.csv"
         write_ls_to_csv(ls, fields, filename)
 
 class Env:
@@ -295,32 +299,34 @@ class Env:
     def get_names_of_all_pdfs_in_folder(self):
         return glob.glob(self.folder_path + "*.pdf")
 
-class ListZipper:
+class Zipper:
 
     def __init__(self, ls):
         self.left = []
         self.focus = ls[0]
         self.right = ls[0:]
-        self.count = 0
 
     def __iter__(self):
         return self
         
     def __next__(self):
         if self.right:
-            self.count += 1
-            self.left.append(self.focus)
-            self.focus = self.right.pop()
+            self.move_right()
             return self.focus
         else:
            raise StopIteration
 
+    def move_right(self, n = 1):
+       for i in range(n):
+           if self.right:
+               self.left.append(self.focus)
+               self.focus = self.right.pop()
+
     def move_left(self, n = 1):
-        print("invocation: " + str(self.count))
         for i in range(n):
-            self.right.append(self.focus)
-            self.focus = self.left.pop()
-        return self.focus
+            if self.left:
+                self.right.append(self.focus)
+                self.focus = self.left.pop()
        
 
 def main(run = True):
@@ -329,10 +335,9 @@ def main(run = True):
         query_result = run_query(env)
         report_matches(query_result, env)
     else:
-        t = ListZipper([1, 2, 3, 4, 5, 6, 7])
+        t = Zipper([1, 2, 3, 4, 5, 6, 7])
         for i in t:
             print(i)
-        print(t.move_left(3))
 
 main(True)
 
