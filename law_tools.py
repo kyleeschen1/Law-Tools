@@ -22,7 +22,7 @@ def parse_tokens_to_ast(tokens):
             
     return current_branch[0]
 
-class CompoundQuery:
+class CompoundPredicate:
 
     def __init__(self):
         pass
@@ -35,7 +35,7 @@ class CompoundQuery:
         for arg in self.args:
            arg.display()
 
-class And(CompoundQuery):
+class And(CompoundPredicate):
 
     def run(self, query_state):
         result = True
@@ -44,7 +44,7 @@ class And(CompoundQuery):
                 result = arg.run(query_state)
         return result
 
-class Or(CompoundQuery): 
+class Or(CompoundPredicate): 
 
     def run(self, query_state):
         result = False
@@ -54,7 +54,7 @@ class Or(CompoundQuery):
         return result
             
 
-class Not(CompoundQuery):
+class Not(CompoundPredicate):
     pass
 
 import re
@@ -63,9 +63,7 @@ class Is:
         pass
 
     def parse_args(self, args):
-        pattern = args[0]
-        self.source = re.compile(f'\*{pattern}\*')
-        #self.source = args[0]
+        self.source = re.compile(args[0])
 
     def display(self):
         print("Is")
@@ -133,6 +131,10 @@ class TextCursor:
         self.previous_words = []
         self.next_words = []
 
+    def stream(self):
+        while self.next_words:
+            yield self
+            
     def continue_running(self):
         return self.next_words
 
@@ -154,20 +156,9 @@ class TextCursor:
     def shift_cursor_right(self):
         if self.current:
             self.previous_words.append(self.current)
-        self.current = self.next_words.pop(0)
+        if self.next_words:
+            self.current = self.next_words.pop(0)
 
-class QueryState:
-
-    def __init__(self):
-        self.successes = []
-
-    def log_success(self, filename, num, cursor):
-        snapshot = {"file" : filename,
-                    "page" : num,
-                    "word" : cursor.current,
-                    "context before" : format_word_ctx(cursor.previous_words[-10:]),
-                    "context after" : format_word_ctx(cursor.next_words[:10])}
-        self.successes.append(snapshot)
 
 def format_word_ctx(ls):
     try:
@@ -180,59 +171,100 @@ import os
 import PyPDF2
 import glob
 
+class QueryRunner:
+
+    def __init__(self):
+        self.start_time = time.time()
+        self.n_matches = 0
+        self.matches = []
+
+    def stream_files(self, list_of_filenames):
+
+        self.files = list_of_filenames
+        self.n_files = len(self.files)
+        self.n_total_files = len(self.files)
+        self.tokens = TextCursor()
+
+        for i, file in enumerate(self.files):
+            self.file_text = file
+            self.file_number = i
+            yield file
+
+    def stream_pages(self, list_of_pages):
+        self.pages = list_of_pages
+        self.n_pages = len(list_of_pages)
+        for i, page in enumerate(self.pages):
+            self.page_number = i
+            yield page
+            
+    def stream_tokens(self, tokens):
+        self.tokens.append_to_stream(tokens)
+        self.tokens.shift_cursor_right()
+        yield self.tokens
+
+    def record_match(self):
+        cursor = self.tokens
+        snapshot = {"file" : self.file_text,
+                    "page" : self.page_number,
+                    "word" : cursor.current,
+                    "context before" : format_word_ctx(cursor.previous_words[-10:]),
+                    "context after" : format_word_ctx(cursor.next_words[:10])}
+        self.n_matches =+ 1
+        self.matches.append(snapshot)
+
+def report_progress(self):
+    seconds_elapsed = round(time.time() - self.start_time, 2)
+    print(chr(27) + "[2J")
+    print("\033c", end ="")
+    red = "\u001b[31m"
+    white = "\u001b[37m"
+    reset = "\u001b[0m"
+    print(f'Currently On: {self.file_text}')
+    print(f'File: [{red}{self.file_number}{reset}/{self.n_files}]') 
+    print(f'Page: [{self.page_number}/{self.n_pages}]') 
+    print(f'Time Elapsed: {seconds_elapsed} seconds')
+    print(f'Number of Matches: {self.n_matches}')
+
+    
+def apply_predicate(predicate, token):
+    return predicate.run(token)
+    
 def run_query(env):
    
+    path = input("Give me the folder name!\n")
+    pred = input("Give me a query!\n")
+    #predicate = compile_predicate_from_string(pred)
+    path = "Unix"
     predicate = compile_predicate_from_string("(or (= Unix) (within 5 command line) (= e))")
-
-    pdf_list = glob.glob(env.path + "*.pdf")
-    query_state = QueryState()
-    text_cursor = TextCursor()
    
-    n_files = len(pdf_list)
-    start_time = time.time()
+    env.set_folder_path(path)
+    pdf_list = env.get_names_of_all_pdfs_in_folder()
 
-    for fileno, filepath in enumerate(pdf_list, 1):
+    qr = QueryRunner()
 
-        pdf_reader = PyPDF2.PdfReader(filepath)
-        text_cursor.clear_previous_words()
+    for file in qr.stream_files(pdf_list):
 
-        filename = filepath.split("/").pop()
-        n_pages = len(pdf_reader.pages)
-        
-        for num, page in enumerate(pdf_reader.pages, 1):
+        pdf_reader = PyPDF2.PdfReader(file)
+        pages = pdf_reader.pages
+
+        for page in qr.stream_pages(pages):
 
             text = page.extract_text().split()
-            text_cursor.append_to_stream(text)
 
-            seconds_elapsed = round(time.time() - start_time, 2)
-            #print(chr(27) + "[2J")
-            #print("\33[2K")
-            print("\033c", end ="")
-            red = "\u001b[31m"
-            white = "\u001b[37m"
-            reset = "\u001b[0m"
-            print(f'Currently On: {filename}')
-            print(f'File: [{red}{fileno}{reset}/{n_files}]') 
-            print(f'Page: [{num}/{n_pages}]') 
-            print(f'Time Elapsed: {seconds_elapsed} seconds')
+            for token in qr.stream_tokens(text):
 
-            while text_cursor.continue_running():
+                if apply_predicate(predicate, token):
 
-                try:
-                    text_cursor.shift_cursor_right()
+                    qr.record_match()
+            
+                report_progress(qr)
 
-                    if predicate.run(text_cursor):
-
-                        query_state.log_success(filename, num, text_cursor)
-                        
-                except:
-                    pass
-    return query_state
+    return qr
                     
 import csv
 
-def write_dict_to_csv(dictionary, fields, filename):
-    "Writes dictionary to csv file. Modified from https://www.tutorialspoint.com/How-to-save-a-Python-Dictionary-to-CSV-file"
+def write_ls_to_csv(dictionary, fields, filename):
+    "Writes ls to csv file. Modified from https://www.tutorialspoint.com/How-to-save-a-Python-Dictionary-to-CSV-file"
     try:
         with open(filename, 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fields)
@@ -242,27 +274,65 @@ def write_dict_to_csv(dictionary, fields, filename):
     except IOError:
         print("I/O error")
 
-def report_successes(query_result, env):
+def report_matches(query_result, env):
 
-    n = len(query_result.successes)
-    print(f'total matches : {n}')
-    dictionary = query_result.successes
-    if dictionary:
-        fields = dictionary[0].keys()
+    ls = query_result.matches
+    if ls:
+        fields = ls[0].keys()
         filename = env.path + "matches.csv"
-
-        write_dict_to_csv(dictionary, fields, filename)
+        write_ls_to_csv(ls, fields, filename)
 
 class Env:
 
     def __init__(self):
         home = os.path.expanduser('~')
-        self.path = f"{home}/Desktop/Unix/"
+        self.path = f"{home}/Desktop/"
 
-def main():
-    env = Env()
-    query_result = run_query(env)
-    report_successes(query_result, env)
+    def set_folder_path(self, folder_name):
+        self.folder_name = folder_name
+        self.folder_path = self.path + folder_name + "/"
 
-main()
+    def get_names_of_all_pdfs_in_folder(self):
+        return glob.glob(self.folder_path + "*.pdf")
+
+class ListZipper:
+
+    def __init__(self, ls):
+        self.left = []
+        self.focus = ls[0]
+        self.right = ls[0:]
+        self.count = 0
+
+    def __iter__(self):
+        return self
+        
+    def __next__(self):
+        if self.right:
+            self.count += 1
+            self.left.append(self.focus)
+            self.focus = self.right.pop()
+            return self.focus
+        else:
+           raise StopIteration
+
+    def move_left(self, n = 1):
+        print("invocation: " + str(self.count))
+        for i in range(n):
+            self.right.append(self.focus)
+            self.focus = self.left.pop()
+        return self.focus
+       
+
+def main(run = True):
+    if run:
+        env = Env()
+        query_result = run_query(env)
+        report_matches(query_result, env)
+    else:
+        t = ListZipper([1, 2, 3, 4, 5, 6, 7])
+        for i in t:
+            print(i)
+        print(t.move_left(3))
+
+main(True)
 
