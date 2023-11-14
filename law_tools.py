@@ -249,10 +249,12 @@ def report_successes(query_result, env):
 
         write_dict_to_csv(dictionary, fields, filename)
 
+import os
 class Env:
 
     def __init__(self):
-        self.path = "user/*/Desktop/Unix/"
+        home = os.path.expanduser('~')
+        self.path = f"{home}/Desktop/Unix/"
 
 def main():
     env = Env()
