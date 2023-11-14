@@ -175,6 +175,7 @@ def format_word_ctx(ls):
         return ls
 
 import time
+
 def run_query(env):
    
     predicate = compile_predicate_from_string("(or (= Unix) (within 5 command line) (= e))")
