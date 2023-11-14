@@ -57,19 +57,23 @@ class Or(CompoundQuery):
 class Not(CompoundQuery):
     pass
 
+import re
 class Is:
     def __init__(self):
         pass
 
     def parse_args(self, args):
-        self.source = args[0]
+        pattern = args[0]
+        self.source = re.compile(f'\*{pattern}\*')
+        #self.source = args[0]
 
     def display(self):
         print("Is")
         print(self.source)
 
     def run(self, query_state):
-        return self.source == query_state.current
+        #return (self.source == query_state.get_current_cursor())
+        return bool(re.match(self.source, query_state.get_current_focus()))
 
 class Within:
 
@@ -165,9 +169,6 @@ class QueryState:
                     "context after" : format_word_ctx(cursor.next_words[:10])}
         self.successes.append(snapshot)
 
-import PyPDF2
-import glob
-
 def format_word_ctx(ls):
     try:
         return ' '.join(ls)
@@ -175,10 +176,14 @@ def format_word_ctx(ls):
         return ls
 
 import time
+import os
+import PyPDF2
+import glob
 
 def run_query(env):
    
     predicate = compile_predicate_from_string("(or (= Unix) (within 5 command line) (= e))")
+
     pdf_list = glob.glob(env.path + "*.pdf")
     query_state = QueryState()
     text_cursor = TextCursor()
@@ -207,7 +212,7 @@ def run_query(env):
             white = "\u001b[37m"
             reset = "\u001b[0m"
             print(f'Currently On: {filename}')
-            print(f'File: [{red}{fileno}{white}/{n_files}]') 
+            print(f'File: [{red}{fileno}{reset}/{n_files}]') 
             print(f'Page: [{num}/{n_pages}]') 
             print(f'Time Elapsed: {seconds_elapsed} seconds')
 
@@ -221,10 +226,7 @@ def run_query(env):
                         query_state.log_success(filename, num, text_cursor)
                         
                 except:
-                    print(text_cursor.get_current_focus())
-                    print(text_cursor.get_n_previous_words(5))
-                    print(text_cursor.get_n_next_words(5))
-
+                    pass
     return query_state
                     
 import csv
@@ -242,6 +244,8 @@ def write_dict_to_csv(dictionary, fields, filename):
 
 def report_successes(query_result, env):
 
+    n = len(query_result.successes)
+    print(f'total matches : {n}')
     dictionary = query_result.successes
     if dictionary:
         fields = dictionary[0].keys()
@@ -249,7 +253,6 @@ def report_successes(query_result, env):
 
         write_dict_to_csv(dictionary, fields, filename)
 
-import os
 class Env:
 
     def __init__(self):
