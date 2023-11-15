@@ -188,7 +188,7 @@ class QueryRunner:
         self.n_total_files = len(self.files)
 
         for i, file in enumerate(self.files):
-            self.file_text = file
+            self.file_name = file.split("/").pop().strip()
             self.file_number = i
             yield file
 
@@ -200,19 +200,37 @@ class QueryRunner:
             yield page
             
     def stream_tokens(self, tokens):
-        #tokens.(tokens)
-        tokens.shift_cursor_right()
-        yield tokens
+        while tokens.next_words:
+            tokens.shift_cursor_right()
+            yield tokens
 
     def record_match(self, cursor):
-        snapshot = {"file" : self.file_text,
+        word =  cursor.current.strip()
+        snapshot = {"file" : self.file_name,
                     "page" : self.page_number,
-                    "word" : cursor.current,
-                    "context before" : format_word_ctx(cursor.previous_words[-10:]),
-                    "context after" : format_word_ctx(cursor.next_words[:10])}
+                    "word" : word
+                    #"place" : format_word_ctx(cursor.previous_words[-10:]) + word +  format_word_ctx(cursor.next_words[:10])
+                    }
         self.n_matches += 1
         self.matches.append(snapshot)
 
+class TerminalOutput:
+
+    def __init__(self):
+        pass
+
+class Headline(TerminalOutput):
+
+    def __init__(self):
+        pass
+
+    def render(self, message):
+        border = (50 * "-")
+        print(f'{border}')
+        print(f'{message}')
+        print(f'{border}')
+        
+headline = Headline()
 def report_progress(self):
     seconds_elapsed = round(time.time() - self.start_time, 2)
     print(chr(27) + "[2J")
@@ -220,13 +238,12 @@ def report_progress(self):
     red = "\u001b[31m"
     white = "\u001b[37m"
     reset = "\u001b[0m"
-    print(f'Currently On: {self.file_text}')
+    headline.render("Running...")
+    print(f'Currently On: {self.file_name}')
     print(f'File: [{red}{self.file_number}{reset}/{self.n_files}]') 
     print(f'Page: [{self.page_number}/{self.n_pages}]') 
     print(f'Time Elapsed: {seconds_elapsed} seconds')
     print(f'Number of Matches: {self.n_matches}')
-    #print(f'Tokens: {self.tokens.current}')
-
     
 def apply_predicate(predicate, token):
     return predicate.run(token)
@@ -235,9 +252,8 @@ def run_query(env):
    
     path = input("Give me the folder name!\n")
     pred = input("Give me a query!\n")
-    predicate = compile_predicate_from_string("(= the)")
     path = "Unix"
-    #predicate = compile_predicate_from_string("(or (= Unix) (within 5 command line) (= e))")
+    predicate = compile_predicate_from_string("(or (= Unix) (within 5 command line) )")
    
     env.set_folder_path(path)
     pdf_list = env.get_names_of_all_pdfs_in_folder()
@@ -255,25 +271,26 @@ def run_query(env):
             text = page.extract_text().split()
             tokens.append_to_stream(text)
 
+            report_progress(qr)
+            
             for token in qr.stream_tokens(tokens):
                 try:
                     if predicate.run(token):
                         qr.record_match(token)
                 except:
-                    pass
-            report_progress(qr)
+                    raise Exception("Error" + str(token.current))
 
     return qr
                     
 import csv
 
-def write_ls_to_csv(dictionary, fields, filename):
-    "Writes ls to csv file. Modified from https://www.tutorialspoint.com/How-to-save-a-Python-Dictionary-to-CSV-file"
+def write_ls_to_csv(ls, fields, filename):
+    "Writes list to csv file. Modified from https://www.tutorialspoint.com/How-to-save-a-Python-Dictionary-to-CSV-file"
     try:
         with open(filename, 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fields)
             writer.writeheader()
-            for data in dictionary:
+            for data in ls:
                 writer.writerow(data)
     except IOError:
         print("I/O error")
